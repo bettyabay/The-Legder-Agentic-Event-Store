@@ -1,0 +1,43 @@
+[project]
+name = "the-ledger"
+version = "0.1.0"
+description = "Agentic Event Store & Enterprise Audit Infrastructure for Apex Financial Services"
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.29",
+    "pydantic>=2.0",
+    "mcp>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "ANN"]
+ignore = [
+    "ANN101",  # missing-type-self
+    "ANN102",  # missing-type-cls
+    "ANN401",  # dynamically-typed-expression (Any)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ANN"]  # no type annotations required in tests
+"scripts/*" = ["ANN"]

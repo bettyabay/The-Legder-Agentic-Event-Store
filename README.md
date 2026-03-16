@@ -106,10 +106,18 @@ src/
 tests/
   conftest.py                  # Session-scoped DB pool + unique ID fixtures
   test_concurrency.py          # Double-decision OCC test (Score 3 gate)
+  test_domain.py               # All 6 business rules (Score 3 gate)
   test_upcasting.py            # Immutability test (Score 4 gate)
   test_projections.py          # SLO lag tests + temporal query (Score 4 gate)
   test_gas_town.py             # Crash recovery test (Score 4 gate)
   test_mcp_lifecycle.py        # Full lifecycle via MCP tools only (Score 5 gate)
+  test_what_if.py              # Counterfactual projector tests (Score 5 bonus)
+  test_regulatory.py           # Regulatory package generation tests (Score 5 bonus)
+
+scripts/
+  seed_demo_application.py     # Full lifecycle seeder via MCP tool calls
+  query_history.py             # Event timeline + compliance audit viewer
+  what_if_demo.py              # Counterfactual scenario demo
 ```
 
 ---
@@ -144,20 +152,26 @@ uv run pytest tests/test_mcp_lifecycle.py -v
 ## Week Standard Demo (60 seconds)
 
 ```bash
-# 1. Show complete decision history for application X
-uv run python scripts/demo_week_standard.py app-{id}
+# 1. Seed a complete application lifecycle (all steps via MCP tools)
+uv run python scripts/seed_demo_application.py --application-id demo-001
 
-# 2. Run double-decision test live
+# 2. Show complete decision history and compliance audit trail
+uv run python scripts/query_history.py --application-id demo-001
+
+# 3. Temporal compliance query (state as of a specific moment)
+uv run python scripts/query_history.py --application-id demo-001 --compliance-only --as-of 2026-03-15T10:00:00Z
+
+# 4. Run double-decision OCC test live
 uv run pytest tests/test_concurrency.py -v -s
 
-# 3. Temporal compliance query
-uv run python scripts/demo_temporal_query.py app-{id} 2026-03-15T10:00:00Z
-
-# 4. Upcasting + immutability
+# 5. Upcasting + immutability test
 uv run pytest tests/test_upcasting.py -v -s
 
-# 5. Gas Town crash recovery
+# 6. Gas Town crash recovery
 uv run pytest tests/test_gas_town.py -v -s
+
+# 7. What-if counterfactual demo (bonus)
+uv run python scripts/what_if_demo.py --application-id demo-001 --risk-tier HIGH
 ```
 
 ---

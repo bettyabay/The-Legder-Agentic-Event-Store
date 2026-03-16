@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  ledger-postgres:
+    image: postgres:16-alpine
+    container_name: ledger-postgres
+    environment:
+      POSTGRES_DB: ledger
+      POSTGRES_USER: ledger
+      POSTGRES_PASSWORD: ledger_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - ledger_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  ledger_pgdata:
