@@ -1,0 +1,34 @@
+﻿---
+description: Project Development Guidelines
+globs: ["**/*"]
+alwaysApply: true
+---
+# The-Legder-Agentic-Event-Store Development Guidelines
+
+Auto-generated from all feature plans. Last updated: 2026-03-16
+
+## Active Technologies
+
+- Python 3.12+ + asyncpg (or psycopg3 async), Pydantic v2, mcp (Python SDK), pytest, pytest-asyncio, hashlib (stdlib) (001-ledger-event-store)
+
+## Project Structure
+
+```text
+src/
+tests/
+```
+
+## Commands
+
+cd src; pytest; ruff check .
+
+## Code Style
+
+Python 3.12+: Follow standard conventions
+
+## Recent Changes
+
+- 001-ledger-event-store: Added Python 3.12+ + asyncpg (or psycopg3 async), Pydantic v2, mcp (Python SDK), pytest, pytest-asyncio, hashlib (stdlib)
+
+<!-- MANUAL ADDITIONS START -->
+<!-- MANUAL ADDITIONS END -->
