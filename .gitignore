@@ -10,6 +10,7 @@ dist/
 build/
 # uv
 .uv/
+uv.lock
 # Environment
 .env
 # Testing
@@ -22,3 +23,4 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+Tenacious_Ledger__Immutable_Governance_Infrastruct.md
