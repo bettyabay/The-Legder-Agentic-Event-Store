@@ -44,6 +44,7 @@ from src.commands.handlers import (
 from src.event_store import EventStore
 from src.integrity.audit_chain import run_integrity_check
 from src.models.exceptions import (
+    AgentContextNotLoadedError,
     DomainError,
     LedgerError,
     OptimisticConcurrencyError,
@@ -359,11 +360,16 @@ async def _dispatch_tool(
             correlation_id=args.get("correlation_id"),
             causation_id=args.get("causation_id"),
         )
-        version = await _with_concurrency_retry(handle_credit_analysis_completed, cmd, store)
-        return _ok({
-            "event_id": str(version),
-            "new_stream_version": version,
-        })
+        try:
+            version = await _with_concurrency_retry(handle_credit_analysis_completed, cmd, store)
+            return _ok({
+                "event_id": str(version),
+                "new_stream_version": version,
+            })
+        except AgentContextNotLoadedError as e:
+            return _err(e, {"suggested_action": "Call start_agent_session before any decision tool."})
+        except PreconditionFailedError as e:
+            return _err(e, {"suggested_action": getattr(e, "suggested_action", "")})
 
     elif name == "record_fraud_screening":
         cmd = FraudScreeningCompletedCommand(

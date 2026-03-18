@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from typing import Any
 
 import asyncpg
 
@@ -24,6 +25,20 @@ from src.models.events import StoredEvent
 logger = logging.getLogger(__name__)
 
 SNAPSHOT_EVENT_COUNT_TRIGGER = 100
+
+
+def _parse_timestamp(val: Any) -> datetime | None:
+    """Parse timestamp from payload (JSONB returns datetimes as strings)."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 class ComplianceAuditViewProjection:
@@ -184,7 +199,7 @@ class ComplianceAuditViewProjection:
             p["rule_id"],
             p["rule_version"],
             p.get("evidence_hash"),
-            p.get("evaluation_timestamp"),
+            _parse_timestamp(p.get("evaluation_timestamp")),
             event.recorded_at,
         )
 

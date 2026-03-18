@@ -84,28 +84,48 @@ class AgentPerformanceLedgerProjection:
 
         await self._ensure_row(agent_id, model_version, event.recorded_at, conn)
 
-        await conn.execute(
-            """
-            UPDATE agent_performance_ledger SET
-              analyses_completed = analyses_completed + 1,
-              avg_duration_ms = CASE
-                WHEN avg_duration_ms IS NULL THEN $3
-                ELSE (avg_duration_ms * analyses_completed + $3) / (analyses_completed + 1)
-              END,
-              avg_confidence_score = CASE
-                WHEN $4 IS NULL THEN avg_confidence_score
-                WHEN avg_confidence_score IS NULL THEN $4
-                ELSE (avg_confidence_score * analyses_completed + $4) / (analyses_completed + 1)
-              END,
-              last_seen_at = $5
-            WHERE agent_id = $1 AND model_version = $2
-            """,
-            agent_id,
-            model_version,
-            float(duration) if duration is not None else 0.0,
-            float(confidence) if confidence is not None else None,
-            event.recorded_at,
-        )
+        duration_val = float(duration) if duration is not None else 0.0
+        confidence_val: float | None = float(confidence) if confidence is not None else None
+
+        if confidence_val is not None:
+            await conn.execute(
+                """
+                UPDATE agent_performance_ledger SET
+                  analyses_completed = analyses_completed + 1,
+                  avg_duration_ms = CASE
+                    WHEN avg_duration_ms IS NULL THEN $3
+                    ELSE (avg_duration_ms * analyses_completed + $3) / (analyses_completed + 1)
+                  END,
+                  avg_confidence_score = CASE
+                    WHEN avg_confidence_score IS NULL THEN $4
+                    ELSE (avg_confidence_score * analyses_completed + $4) / (analyses_completed + 1)
+                  END,
+                  last_seen_at = $5
+                WHERE agent_id = $1 AND model_version = $2
+                """,
+                agent_id,
+                model_version,
+                duration_val,
+                confidence_val,
+                event.recorded_at,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE agent_performance_ledger SET
+                  analyses_completed = analyses_completed + 1,
+                  avg_duration_ms = CASE
+                    WHEN avg_duration_ms IS NULL THEN $3
+                    ELSE (avg_duration_ms * analyses_completed + $3) / (analyses_completed + 1)
+                  END,
+                  last_seen_at = $4
+                WHERE agent_id = $1 AND model_version = $2
+                """,
+                agent_id,
+                model_version,
+                duration_val,
+                event.recorded_at,
+            )
 
     async def _handle_DecisionGenerated(
         self,

@@ -150,8 +150,8 @@ class EventStore:
                         new_version,
                         event.event_type,
                         event.event_version,
-                        json.dumps(payload),
-                        json.dumps(metadata),
+                        json.dumps(payload, default=str),
+                        json.dumps(metadata, default=str),
                     )
                     inserted_ids.append(row["event_id"])
 
@@ -175,7 +175,8 @@ class EventStore:
                                 "event_type": event.event_type,
                                 "stream_id": stream_id,
                                 **event.payload_dict(),
-                            }
+                            },
+                            default=str,
                         ),
                     )
 

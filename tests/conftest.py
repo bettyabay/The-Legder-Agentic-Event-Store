@@ -17,12 +17,12 @@ import pytest_asyncio
 from src.db.pool import create_pool, run_migrations
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def db_pool() -> AsyncGenerator[asyncpg.Pool, None]:
-    """Session-scoped asyncpg connection pool.
+    """Per-test asyncpg connection pool (same event loop as the test).
 
-    Creates the pool once per test session, runs migrations on first use,
-    and closes the pool after all tests complete.
+    Session scope would bind the pool to a different event loop than the one
+    running each test, causing 'Future attached to a different loop' with asyncpg.
     """
     dsn = os.environ.get(
         "DATABASE_URL",
