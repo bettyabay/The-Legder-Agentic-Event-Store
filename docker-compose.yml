@@ -18,5 +18,13 @@ services:
       timeout: 5s
       retries: 10
 
+  adminer:
+    image: adminer:latest
+    container_name: adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - ledger-postgres
+
 volumes:
   ledger_pgdata:
