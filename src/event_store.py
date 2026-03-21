@@ -62,7 +62,7 @@ class EventStore:
     async def append(
         self,
         stream_id: str,
-        events: list[BaseEvent],
+        events: list[Any],
         expected_version: int,
         correlation_id: str | None = None,
         causation_id: str | None = None,
@@ -137,9 +137,41 @@ class EventStore:
                     metadata["causation_id"] = causation_id
 
                 inserted_ids: list[UUID] = []
+
+                def _event_to_db_fields(ev: Any) -> tuple[str, int, dict[str, Any]]:
+                    """
+                    Convert either:
+                      - src.models.events.BaseEvent instances, or
+                      - starter/ledger/schema/events.py canonical events (via to_store_dict()),
+                    into (event_type, event_version, payload_dict).
+                    """
+                    # Case 1: src BaseEvent
+                    if hasattr(ev, "payload_dict") and hasattr(ev, "event_type") and hasattr(ev, "event_version"):
+                        return str(ev.event_type), int(ev.event_version), ev.payload_dict()  # type: ignore[attr-defined]
+
+                    # Case 2: starter canonical event (pydantic BaseModel) with to_store_dict()
+                    if hasattr(ev, "to_store_dict"):
+                        store_dict = ev.to_store_dict()  # type: ignore[attr-defined]
+                        event_type = str(store_dict["event_type"])
+                        event_version = int(store_dict.get("event_version", 1))
+                        payload = store_dict.get("payload", {}) or {}
+                        return event_type, event_version, payload
+
+                    # Case 3: already a plain dict with required keys
+                    if isinstance(ev, dict):
+                        event_type = str(ev["event_type"])
+                        event_version = int(ev.get("event_version", 1))
+                        payload = ev.get("payload", {}) or {}
+                        return event_type, event_version, payload
+
+                    raise TypeError(
+                        "Unsupported event type for EventStore.append(); expected BaseEvent, "
+                        "starter canonical event with to_store_dict(), or dict with event_type/payload."
+                    )
+
                 for event in events:
                     new_version += 1
-                    payload = event.payload_dict()
+                    event_type, event_version, payload = _event_to_db_fields(event)
                     row = await conn.fetchrow(
                         "INSERT INTO events "
                         "(stream_id, stream_position, event_type, event_version, "
@@ -148,8 +180,8 @@ class EventStore:
                         "RETURNING event_id",
                         stream_id,
                         new_version,
-                        event.event_type,
-                        event.event_version,
+                        event_type,
+                        event_version,
                         json.dumps(payload, default=str),
                         json.dumps(metadata, default=str),
                     )
@@ -165,6 +197,7 @@ class EventStore:
 
                 # ── 4. Write to outbox (same transaction) ─────────────
                 for event, event_id in zip(events, inserted_ids, strict=True):
+                    event_type, _event_version, payload = _event_to_db_fields(event)
                     await conn.execute(
                         "INSERT INTO outbox (event_id, destination, payload) "
                         "VALUES ($1, $2, $3::jsonb)",
@@ -172,9 +205,9 @@ class EventStore:
                         "internal",
                         json.dumps(
                             {
-                                "event_type": event.event_type,
+                                "event_type": event_type,
                                 "stream_id": stream_id,
-                                **event.payload_dict(),
+                                **payload,
                             },
                             default=str,
                         ),
@@ -326,6 +359,30 @@ class EventStore:
             archived_at=row["archived_at"],
             metadata=json.loads(row["metadata"]) if row["metadata"] else {},
         )
+
+    async def find_session_stream_id(self, session_id: str) -> str | None:
+        """
+        Best-effort lookup of an agent session stream id by session_id found in
+        event payloads.
+
+        Supports both:
+          - reduced Phase 2/3: AgentContextLoaded payload.session_id
+          - Week-5 canonical: AgentSessionStarted payload.session_id
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT stream_id
+                FROM events
+                WHERE
+                  payload->>'session_id' = $1
+                  AND event_type IN ('AgentContextLoaded', 'AgentSessionStarted')
+                ORDER BY global_position ASC
+                LIMIT 1
+                """,
+                session_id,
+            )
+        return row["stream_id"] if row else None
 
 
 # ---------------------------------------------------------------------------

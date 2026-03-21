@@ -60,6 +60,8 @@ class AgentContext:
     session_health_status: SessionHealth
     model_version: str = ""
     context_source: str = ""
+    last_successful_node: str | None = None
+    executed_nodes: list[str] = field(default_factory=list)
     reconstructed_at: datetime = field(
         default_factory=lambda: datetime.now(tz=timezone.utc)
     )
@@ -87,8 +89,16 @@ async def reconstruct_agent_context(
         the returned context has session_health_status = NEEDS_RECONCILIATION.
         The agent MUST resolve this before proceeding.
     """
+    # Reduced Phase 2/3 uses stream_id = agent-{agent_id}-{session_id}.
+    # Week-5 canonical uses agent-{agent_type}-{session_id} and includes session_id
+    # inside payload. We try both.
     stream_id = f"agent-{agent_id}-{session_id}"
     events = await store.load_stream(stream_id)
+    if not events:
+        alt_stream_id = await store.find_session_stream_id(session_id)
+        if alt_stream_id:
+            stream_id = alt_stream_id
+            events = await store.load_stream(stream_id)
 
     if not events:
         return AgentContext(
@@ -124,9 +134,23 @@ async def reconstruct_agent_context(
     # Extract model version and context source from first event
     model_version = ""
     context_source = ""
-    if events and events[0].event_type == "AgentContextLoaded":
-        model_version = events[0].payload.get("model_version", "")  # type: ignore[assignment]
-        context_source = events[0].payload.get("context_source", "")  # type: ignore[assignment]
+    if events:
+        if events[0].event_type == "AgentContextLoaded":
+            model_version = events[0].payload.get("model_version", "")  # type: ignore[assignment]
+            context_source = events[0].payload.get("context_source", "")  # type: ignore[assignment]
+        elif events[0].event_type == "AgentSessionStarted":
+            model_version = events[0].payload.get("model_version", "")  # type: ignore[assignment]
+            context_source = events[0].payload.get("context_source", "")  # type: ignore[assignment]
+
+    # Week-5 canonical node tracking
+    last_successful_node: str | None = None
+    executed_nodes: list[str] = []
+    for ev in events:
+        if ev.event_type == "AgentNodeExecuted":
+            node_name = ev.payload.get("node_name")
+            if isinstance(node_name, str):
+                executed_nodes.append(node_name)
+                last_successful_node = node_name
 
     return AgentContext(
         agent_id=agent_id,
@@ -137,6 +161,8 @@ async def reconstruct_agent_context(
         session_health_status=health,
         model_version=str(model_version),
         context_source=str(context_source),
+        last_successful_node=last_successful_node,
+        executed_nodes=executed_nodes,
     )
 
 
@@ -147,6 +173,10 @@ def _determine_health(events: list[StoredEvent]) -> SessionHealth:
 
     last = events[-1]
     if last.event_type in _PARTIAL_DECISION_EVENTS:
+        return SessionHealth.NEEDS_RECONCILIATION
+
+    # Week-5 canonical recovery: a failed session indicates it must be reconciled.
+    if last.event_type in {"AgentSessionFailed", "AgentSessionRecovered"}:
         return SessionHealth.NEEDS_RECONCILIATION
 
     return SessionHealth.OK

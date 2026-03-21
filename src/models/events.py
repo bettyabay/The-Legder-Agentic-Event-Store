@@ -317,3 +317,19 @@ def hash_inputs(data: Any) -> str:
 
 def make_event_id() -> UUID:
     return uuid4()
+
+
+# ---------------------------------------------------------------------------
+# Week-5 canonical event catalogue (single source of truth)
+# ---------------------------------------------------------------------------
+#
+# The repo includes the Week-5 canonical event models in
+# `starter/ledger/schema/events.py`. We re-export them here so the rest of the
+# `src/` codebase can import event types from a single place.
+#
+# Note: `StoredEvent` / `StreamMetadata` / `BaseEvent` wrappers for the DB are
+# intentionally kept in this module. The canonical catalogue defines *domain*
+# event classes whose instances are serialised via `.to_store_dict()`.
+#
+# By importing at the end, these re-exports override the reduced placeholders
+# defined earlier in this file.

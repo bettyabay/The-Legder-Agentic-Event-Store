@@ -128,6 +128,17 @@ class LoanApplicationAggregate:
         self.state = ApplicationState.ANALYSIS_COMPLETE
         self.credit_analysis_completed = True
 
+    def _on_FraudScreeningRequested(self, event: StoredEvent) -> None:
+        """
+        Week-5 side-effect: the CreditAnalysisAgent completion triggers a new
+        fraud screening request on the loan stream.
+
+        In the current codebase, CreditAnalysisCompleted is still written to
+        the loan stream for backward compatibility; this handler lets us start
+        aligning the state machine to the Week-5 stream boundaries.
+        """
+        self.state = ApplicationState.ANALYSIS_COMPLETE
+
     def _on_FraudScreeningCompleted(self, event: StoredEvent) -> None:
         # Fraud screening does not change the primary state machine
         pass
