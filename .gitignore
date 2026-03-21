@@ -29,3 +29,6 @@ Tenacious_Ledger__Immutable_Governance_Infrastruct.md
 
 starters/
 .specstory/
+artifacts/
+starter/documents/
+starter/data/applicant_profiles.json
