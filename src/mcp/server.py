@@ -81,7 +81,11 @@ async def main() -> None:
 
     logger.info("The Ledger MCP server starting on stdio transport")
     async with stdio_server() as streams:
-        await server.run(*streams)
+        # MCP SDK requires explicit initialization options in newer versions.
+        await server.run(
+            *streams,
+            initialization_options=server.create_initialization_options(),
+        )
 
 
 if __name__ == "__main__":

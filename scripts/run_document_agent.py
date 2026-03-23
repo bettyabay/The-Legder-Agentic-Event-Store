@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 
 from starter.ledger.schema.events import AgentType
 
@@ -17,7 +18,16 @@ async def _main() -> None:
     parser.add_argument("--application-id", required=True, help="Application ID, e.g. APEX-0007")
     parser.add_argument("--agent-id", default="doc-agent-1")
     parser.add_argument("--model", default="claude-sonnet-4-20250514")
+    parser.add_argument(
+        "--document-path",
+        action="append",
+        default=[],
+        help="Absolute/relative document path. Repeat for multiple files/folders.",
+    )
     args = parser.parse_args()
+
+    if args.document_path:
+        os.environ["LEDGER_DOCUMENT_PATHS"] = os.pathsep.join(args.document_path)
 
     pool = await create_pool()
     try:

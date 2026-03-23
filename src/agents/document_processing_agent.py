@@ -5,6 +5,7 @@ import os
 import re
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -67,6 +68,42 @@ class DocumentProcessingAgent(BaseApexAgent):
         if submitted is None:
             raise ValueError(f"ApplicationSubmitted not found for {app_id}")
         docs = [e.payload for e in loan_events if e.event_type == "DocumentUploaded"]
+        # Real-world fallback: if documents exist on disk but upload events were not
+        # recorded yet, discover and backfill DocumentUploaded so downstream nodes work.
+        if not docs:
+            applicant_id = str(submitted.payload.get("applicant_id", ""))
+            discovered = self._discover_docs_on_disk(app_id, applicant_id)
+            if discovered:
+                current_ver = await self.store.stream_version(f"loan-{app_id}")
+                now_iso = datetime.now(timezone.utc).isoformat()
+                upload_events: list[dict[str, Any]] = []
+                for i, d in enumerate(discovered, start=1):
+                    upload_events.append(
+                        {
+                            "event_type": "DocumentUploaded",
+                            "event_version": 1,
+                            "payload": {
+                                "application_id": app_id,
+                                "document_id": d["document_id"] or f"doc-auto-{i}",
+                                "document_type": d["document_type"],
+                                "document_format": d["document_format"],
+                                "filename": d["filename"],
+                                "file_path": d["file_path"],
+                                "file_size_bytes": d["file_size_bytes"],
+                                "file_hash": d["file_hash"],
+                                "fiscal_year": d["fiscal_year"],
+                                "uploaded_at": now_iso,
+                                "uploaded_by": "system:auto_discovery",
+                            },
+                        }
+                    )
+                await self.store.append(
+                    f"loan-{app_id}",
+                    upload_events,
+                    expected_version=current_ver,
+                )
+                loan_events = await self.store.load_stream(f"loan-{app_id}")
+                docs = [e.payload for e in loan_events if e.event_type == "DocumentUploaded"]
         if not docs:
             raise ValueError(f"No DocumentUploaded events found for {app_id}")
         await self._record_node_execution(
@@ -76,6 +113,68 @@ class DocumentProcessingAgent(BaseApexAgent):
             duration_ms=int((time.time() - t0) * 1000),
         )
         return {**state, "applicant_id": str(submitted.payload.get("applicant_id", "")), "uploaded_documents": docs}
+
+    def _discover_docs_on_disk(self, app_id: str, applicant_id: str) -> list[dict[str, Any]]:
+        """Best-effort discovery of application documents from local workspace."""
+        roots: list[Path] = []
+        explicit = os.environ.get("LEDGER_DOCUMENT_PATHS", "")
+        explicit_roots: set[str] = set()
+        if explicit:
+            for raw in explicit.split(os.pathsep):
+                candidate = raw.strip()
+                if candidate:
+                    p = Path(candidate)
+                    roots.append(p)
+                    explicit_roots.add(str(p.resolve()))
+        roots.extend([Path("documents"), Path("artifacts"), Path(".")])
+        prefixes = [f"{app_id}_", app_id]
+        found: list[dict[str, Any]] = []
+        seen_paths: set[str] = set()
+
+        for root in roots:
+            if not root.exists():
+                continue
+            search_root = root / applicant_id if root.is_dir() and applicant_id and (root / applicant_id).exists() else root
+            is_explicit_root = str(root.resolve()) in explicit_roots
+            if search_root.is_file():
+                candidates = [search_root]
+            else:
+                candidates = list(search_root.rglob("*"))
+            for p in candidates:
+                if not p.is_file():
+                    continue
+                name = p.name
+                # Explicit paths are user-selected inputs and should not require
+                # app-id-prefixed filenames.
+                if not is_explicit_root and not any(name.startswith(pref) for pref in prefixes):
+                    continue
+                ext = p.suffix.lower().lstrip(".")
+                if ext not in {"pdf", "xlsx", "xls", "csv"}:
+                    continue
+                normalized = str(p).replace("\\", "/")
+                if normalized in seen_paths:
+                    continue
+                seen_paths.add(normalized)
+                lower = name.lower()
+                if "balance" in lower:
+                    doc_type = "balance_sheet"
+                elif "income" in lower or "financial" in lower:
+                    doc_type = "income_statement"
+                else:
+                    doc_type = "application_proposal"
+                found.append(
+                    {
+                        "document_id": f"doc-auto-{abs(hash(normalized)) % (10**8):08d}",
+                        "document_type": doc_type,
+                        "document_format": ext,
+                        "filename": name,
+                        "file_path": normalized,
+                        "file_size_bytes": p.stat().st_size,
+                        "file_hash": "",
+                        "fiscal_year": 2024 if "2024" in lower else None,
+                    }
+                )
+        return found
 
     async def _node_validate_formats(self, state: DocProcState) -> DocProcState:
         t0 = time.time()
