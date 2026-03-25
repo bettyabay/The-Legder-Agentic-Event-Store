@@ -148,7 +148,7 @@ and the result is identifiably approximate (model_version → "legacy-pre-2026")
 | `UNIQUE (stream_id, stream_position)` | Optimistic concurrency via `expectedRevision` parameter | PostgreSQL enforces this at constraint level; EventStoreDB enforces at protocol level |
 | `event_streams.current_version` | Last event number in stream | EventStoreDB tracks this internally; we maintain explicitly |
 | `projection_checkpoints` | Persistent subscription checkpoint | EventStoreDB stores checkpoint server-side; we store client-side |
-| `outbox` table | Outbox pattern / durable publication buffer | In this implementation, projections do NOT consume the outbox; it exists as a durable buffer for downstream publishing/integration. EventStoreDB persistent subscriptions cover projection/polling needs, but cross-system delivery still typically benefits from an outbox-style buffer. |
+| `outbox` table | Outbox pattern / durable publication buffer | Projections do NOT consume the outbox. Instead, an optional Week-10 `OutboxPublisherDaemon` can drain pending rows and forward them to Kafka when enabled. EventStoreDB persistent subscriptions cover projection/polling needs, but cross-system delivery still typically benefits from an outbox-style buffer. |
 | `EventStore.load_all()` | `$all` stream subscription | `$all` is the global ordered event log in EventStoreDB |
 | `ProjectionDaemon` | EventStoreDB persistent subscriptions / Marten Async Daemon | EventStoreDB provides server-side projection execution; we implement client-side |
 | `UpcasterRegistry` | EventStoreDB transforms / Marten schema evolution | EventStoreDB has no built-in upcasting; community handles via transformation middleware |

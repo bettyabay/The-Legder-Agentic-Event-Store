@@ -62,6 +62,33 @@ uv run python -m src.mcp.server
 
 The server communicates on stdio (standard MCP transport).
 
+### 6. (Optional, Week 10) Enable Outbox Publisher → Kafka
+
+The event store writes to the `outbox` table atomically with each appended event. To forward those rows to Kafka, enable the optional outbox publisher daemon.
+
+Requirements:
+- Kafka brokers reachable from the machine running the server
+
+PowerShell:
+```powershell
+$env:LEDGER_ENABLE_OUTBOX_PUBLISHER="true"
+$env:KAFKA_BROKERS="localhost:9092"
+$env:KAFKA_TOPIC="ledger.events"
+
+uv run python -m src.mcp.server
+```
+
+If you want to drain outbox rows safely without sending to Kafka:
+```powershell
+$env:LEDGER_ENABLE_OUTBOX_PUBLISHER="true"
+$env:LEDGER_OUTBOX_DRY_RUN="true"
+$env:KAFKA_BROKERS="localhost:9092"  # still required by config when enabled
+
+uv run python -m src.mcp.server
+```
+
+In dry-run mode, the daemon logs publish attempts but does NOT mark rows as published (`published_at` stays `NULL`).
+
 ---
 
 ## Project Structure

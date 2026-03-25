@@ -222,7 +222,9 @@ class EventStore:
                         "INSERT INTO outbox (event_id, destination, payload) "
                         "VALUES ($1, $2, $3::jsonb)",
                         event_id,
-                        "internal",
+                        # Week-10 integration path. An outbox publisher daemon drains
+                        # these rows and forwards them to Kafka when configured.
+                        "kafka-week-10",
                         json.dumps(
                             {
                                 "event_type": event_type,

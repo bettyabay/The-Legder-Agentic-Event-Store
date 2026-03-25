@@ -30,6 +30,7 @@ from src.projections.application_summary import ApplicationSummaryProjection
 from src.projections.compliance_audit import ComplianceAuditViewProjection
 from src.projections.daemon import ProjectionDaemon
 from src.upcasting.registry import registry
+from src.outbox.daemon import OutboxPublisherDaemon
 
 # Register upcasters at import time (side-effect import)
 import src.upcasting.upcasters  # noqa: F401
@@ -78,6 +79,18 @@ async def main() -> None:
 
     # Start daemon as background task
     asyncio.create_task(daemon.run_forever(poll_interval_ms=100))
+
+    # Optional Week-10 outbox publisher (Kafka integration)
+    try:
+        outbox_daemon = OutboxPublisherDaemon.from_env(pool=pool)
+        if outbox_daemon.stats().get("enabled"):
+            asyncio.create_task(outbox_daemon.run_forever())
+            logger.info("Outbox publisher daemon enabled (destination=%s).", outbox_daemon.stats().get("destination"))
+        else:
+            logger.info("Outbox publisher daemon disabled (set LEDGER_ENABLE_OUTBOX_PUBLISHER=true to enable).")
+    except Exception:
+        # Do not fail MCP server startup if outbox publisher is misconfigured.
+        logger.exception("Failed to initialize outbox publisher daemon; continuing without it.")
 
     logger.info("The Ledger MCP server starting on stdio transport")
     async with stdio_server() as streams:
