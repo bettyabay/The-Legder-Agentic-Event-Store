@@ -24,7 +24,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import asyncpg
 from mcp.server import Server
@@ -35,6 +35,14 @@ from src.projections.compliance_audit import ComplianceAuditViewProjection
 from src.projections.daemon import ProjectionDaemon
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_uri(uri: object) -> str:
+    """Coerce MCP URI input to plain string.
+
+    Some MCP clients pass pydantic AnyUrl objects instead of raw str.
+    """
+    return unquote(str(uri))
 
 
 def register_resources(
@@ -96,11 +104,12 @@ def register_resources(
         ]
 
     @server.read_resource()
-    async def read_resource(uri: str) -> str:
+    async def read_resource(uri: object) -> str:
+        uri_str = _normalize_uri(uri)
         try:
-            return await _dispatch_resource(uri, store, pool, daemon, compliance_proj)
+            return await _dispatch_resource(uri_str, store, pool, daemon, compliance_proj)
         except Exception as exc:
-            logger.exception("Error reading resource '%s'", uri)
+            logger.exception("Error reading resource '%s'", uri_str)
             return json.dumps({"error": str(exc), "error_type": type(exc).__name__})
 
 
@@ -124,6 +133,14 @@ async def _dispatch_resource(
     if base_uri == "ledger://ledger/health":
         lags = await daemon.get_all_lags()
         return json.dumps({"projection_lags_ms": lags, "status": "healthy"})
+
+    # Guard: some clients invoke template URIs literally (e.g. {id}).
+    if "{id}" in base_uri or "%7Bid%7D" in base_uri:
+        return json.dumps({
+            "error": "InvalidResourceUri",
+            "message": "Replace {id} with a real identifier, e.g. ledger://applications/APEX-0012",
+            "uri": base_uri,
+        })
 
     # ledger://applications/{id}
     if base_uri.startswith("ledger://applications/"):
