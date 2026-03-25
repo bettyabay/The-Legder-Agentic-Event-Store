@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 
@@ -36,6 +37,13 @@ from src.event_store import set_registry
 from src.upcasting.registry import registry
 
 set_registry(registry)
+
+# Windows terminals often default to cp1252, which can't encode emoji/symbols.
+# This script prints unicode icons (e.g. ⚠). Force UTF-8 so we don't crash.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 # ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -69,13 +77,25 @@ def _fmt_event(event: dict) -> str:
     if "applicant_id" in payload:
         details.append(f"applicant={payload['applicant_id']}")
     if "requested_amount_usd" in payload:
-        details.append(f"amount=${payload['requested_amount_usd']:,.0f}")
+        try:
+            amt = float(payload["requested_amount_usd"])
+            details.append(f"amount=${amt:,.0f}")
+        except (TypeError, ValueError):
+            details.append(f"amount={payload['requested_amount_usd']}")
     if "risk_tier" in payload:
         details.append(f"risk={payload['risk_tier']}")
     if "confidence_score" in payload and payload["confidence_score"] is not None:
-        details.append(f"confidence={payload['confidence_score']:.2f}")
+        try:
+            conf = float(payload["confidence_score"])
+            details.append(f"confidence={conf:.2f}")
+        except (TypeError, ValueError):
+            details.append(f"confidence={payload['confidence_score']}")
     if "fraud_score" in payload:
-        details.append(f"fraud_score={payload['fraud_score']:.2f}")
+        try:
+            fraud = float(payload["fraud_score"])
+            details.append(f"fraud_score={fraud:.2f}")
+        except (TypeError, ValueError):
+            details.append(f"fraud_score={payload['fraud_score']}")
     if "rule_id" in payload:
         details.append(f"rule={payload['rule_id']}")
     if "recommendation" in payload:

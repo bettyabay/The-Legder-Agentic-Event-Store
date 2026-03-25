@@ -97,11 +97,13 @@ results — that is ComplianceRecord's responsibility.
 - Expected OCC errors/minute: ~10–15
 
 **Retry strategy:**
-- MCP tools apply automatic retry with exponential backoff: 100ms / 200ms / 400ms
-- Maximum 3 retries before returning `OptimisticConcurrencyError` to the caller
-- **Maximum retry budget**: 3 retries × 400ms max backoff = 1.2 seconds per conflicting command
-- After 3 retries, the tool returns a structured error with `suggested_action: reload_stream_and_retry`
-  so the calling LLM can initiate a new command cycle
+- For the **MCP tools command-side pipeline**, concurrency errors are retried by `src/mcp/tools.py` with a fixed budget of **3 attempts total**:
+  - Backoff sleeps are **100ms then 200ms** (no sleep on the final failed attempt)
+  - This yields a maximum additional wait of ~**0.3s** per conflicting command (plus normal execution time)
+- After the budget is exhausted, the tool returns a structured error with `suggested_action: reload_stream_and_retry`
+- For the **direct agent pipeline** used by the dashboard “Run Agents” tab (Tab 8), the agent base class retries OCC internally with a larger budget:
+  - `src/agents/base_agent.py` uses `MAX_OCC_RETRIES = 5` with exponential backoff `0.05s * 2**attempt`
+  - This gives a maximum additional wait of ~**0.75s** across the intermediate retry sleeps (plus normal execution time), so the calling LLM can initiate a new command cycle
 
 **At 1,000 apps/hour sustained load:**
 - ~4 OCC errors/minute expected on loan streams
@@ -146,7 +148,7 @@ and the result is identifiably approximate (model_version → "legacy-pre-2026")
 | `UNIQUE (stream_id, stream_position)` | Optimistic concurrency via `expectedRevision` parameter | PostgreSQL enforces this at constraint level; EventStoreDB enforces at protocol level |
 | `event_streams.current_version` | Last event number in stream | EventStoreDB tracks this internally; we maintain explicitly |
 | `projection_checkpoints` | Persistent subscription checkpoint | EventStoreDB stores checkpoint server-side; we store client-side |
-| `outbox` table | Built-in persistent subscriptions | EventStoreDB provides durable catch-up subscriptions natively; no outbox needed |
+| `outbox` table | Outbox pattern / durable publication buffer | In this implementation, projections do NOT consume the outbox; it exists as a durable buffer for downstream publishing/integration. EventStoreDB persistent subscriptions cover projection/polling needs, but cross-system delivery still typically benefits from an outbox-style buffer. |
 | `EventStore.load_all()` | `$all` stream subscription | `$all` is the global ordered event log in EventStoreDB |
 | `ProjectionDaemon` | EventStoreDB persistent subscriptions / Marten Async Daemon | EventStoreDB provides server-side projection execution; we implement client-side |
 | `UpcasterRegistry` | EventStoreDB transforms / Marten schema evolution | EventStoreDB has no built-in upcasting; community handles via transformation middleware |
@@ -233,3 +235,8 @@ Every column in every table exists for a documented reason:
 | `global_position` | Identifies exactly which event caused the failure |
 | `retry_count` | Distinguishes transient errors (count < 3) from permanent failures (count = 3) |
 | `error_message` | Root-cause analysis for projection debugging |
+
+---
+### applicant_registry (read-only reference data for agents; non-event-sourced)
+This schema supports agent tool lookups for borrower/company reference data and compliance context.
+It is intentionally separate from the event-sourced domain (it is not appended to via `EventStore`, and projections do not build it from events).

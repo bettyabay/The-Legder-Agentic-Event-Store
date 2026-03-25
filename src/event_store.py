@@ -108,14 +108,34 @@ class EventStore:
                         )
                     # Infer aggregate_type from stream_id prefix
                     aggregate_type = stream_id.split("-")[0]
+                    # Concurrency-safe stream creation:
+                    # two concurrent writers may both observe "missing" stream_row and
+                    # race to insert the event_streams row. ON CONFLICT makes this
+                    # deterministic; we then re-fetch and apply expected_version rules.
                     await conn.execute(
                         "INSERT INTO event_streams "
                         "(stream_id, aggregate_type, current_version) "
-                        "VALUES ($1, $2, 0)",
+                        "VALUES ($1, $2, 0) "
+                        "ON CONFLICT (stream_id) DO NOTHING",
                         stream_id,
                         aggregate_type,
                     )
-                    current_version = 0
+                    stream_row = await conn.fetchrow(
+                        "SELECT current_version, archived_at "
+                        "FROM event_streams WHERE stream_id = $1 FOR UPDATE",
+                        stream_id,
+                    )
+                    assert stream_row is not None
+                    if stream_row["archived_at"] is not None:
+                        raise StreamArchivedError(stream_id=stream_id)
+
+                    current_version = stream_row["current_version"]
+                    if expected_version not in (-1, current_version):
+                        raise OptimisticConcurrencyError(
+                            stream_id=stream_id,
+                            expected_version=expected_version,
+                            actual_version=current_version,
+                        )
                 else:
                     if stream_row["archived_at"] is not None:
                         raise StreamArchivedError(stream_id=stream_id)

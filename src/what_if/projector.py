@@ -68,6 +68,35 @@ async def run_what_if(
     stream_id = f"loan-{application_id}"
     all_events = await store.load_stream(stream_id)
 
+    # The canonical agent pipeline in this repo writes CreditAnalysisCompleted
+    # to the *credit* stream (credit-{application_id}), while the what-if
+    # projector evaluates the loan stream (loan-{application_id}).
+    #
+    # If the branch event type is missing on the loan stream, inject the most
+    # recent matching event from the credit stream so branching works.
+    if (
+        branch_at_event_type == "CreditAnalysisCompleted"
+        and not any(e.event_type == "CreditAnalysisCompleted" for e in all_events)
+    ):
+        credit_stream_id = f"credit-{application_id}"
+        credit_events = await store.load_stream(credit_stream_id)
+        credit_completed = next(
+            (e for e in reversed(credit_events) if e.event_type == "CreditAnalysisCompleted"),
+            None,
+        )
+        if credit_completed is not None:
+            # Insert after the last CreditAnalysisRequested if present; otherwise append.
+            last_req_idx = -1
+            for i, e in enumerate(all_events):
+                if e.event_type == "CreditAnalysisRequested":
+                    last_req_idx = i
+            if last_req_idx >= 0:
+                all_events = (
+                    all_events[: last_req_idx + 1] + [credit_completed] + all_events[last_req_idx + 1 :]
+                )
+            else:
+                all_events = all_events + [credit_completed]
+
     # 1. Partition events at the branch point
     pre_branch: list[StoredEvent] = []
     real_branch_events: list[StoredEvent] = []
@@ -185,9 +214,21 @@ def _evaluate_sequence(events: list[StoredEvent]) -> dict[str, Any]:
         if event.event_type == "ApplicationSubmitted":
             outcome["final_state"] = "SUBMITTED"
         elif event.event_type == "CreditAnalysisCompleted":
-            outcome["risk_tier"] = p.get("risk_tier")
-            outcome["recommended_limit_usd"] = p.get("recommended_limit_usd")
-            outcome["confidence_score"] = p.get("confidence_score")
+            # Payload shape differs across stored data vs counterfactual events:
+            # - counterfactual: flat fields (risk_tier, recommended_limit_usd, confidence_score)
+            # - stored credit stream: decision nested under `decision{...}`
+            decision = p.get("decision") if isinstance(p, dict) else None
+            if isinstance(decision, dict):
+                outcome["risk_tier"] = p.get("risk_tier") or decision.get("risk_tier")
+                outcome["recommended_limit_usd"] = p.get("recommended_limit_usd") or decision.get(
+                    "recommended_limit_usd"
+                )
+                # Stored payload uses `confidence`; the event model uses `confidence_score`.
+                outcome["confidence_score"] = p.get("confidence_score") or decision.get("confidence")
+            else:
+                outcome["risk_tier"] = p.get("risk_tier") if isinstance(p, dict) else None
+                outcome["recommended_limit_usd"] = p.get("recommended_limit_usd") if isinstance(p, dict) else None
+                outcome["confidence_score"] = p.get("confidence_score") if isinstance(p, dict) else None
             outcome["final_state"] = "ANALYSIS_COMPLETE"
         elif event.event_type == "DecisionGenerated":
             outcome["decision"] = p.get("recommendation")

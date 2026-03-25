@@ -16,12 +16,9 @@ SLO enforcement:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 import asyncpg
@@ -32,6 +29,7 @@ from src.models.events import StoredEvent
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
+EVENTS_PER_PROCESS_BATCH = 1000
 
 
 class Projection(Protocol):
@@ -53,7 +51,7 @@ class Projection(Protocol):
 class LagRecord:
     last_processed_global_position: int = 0
     last_processed_at: datetime = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
+        default_factory=lambda: datetime.now(tz=UTC)
     )
     slo_breach_cycles: int = 0
 
@@ -98,15 +96,31 @@ class ProjectionDaemon:
     async def _process_batch(self) -> None:
         """Load events from lowest checkpoint, route to projections, update checkpoints."""
         checkpoints = await self._load_checkpoints()
-        min_position = min(checkpoints.values()) if checkpoints else 0
+        # IMPORTANT:
+        # If a projection checkpoint row is missing (e.g. after rebuild_projection()
+        # deletes its checkpoint row), we must treat that projection as having
+        # checkpoint=0. Otherwise min_position could advance past events that
+        # that projection still needs to rebuild, leaving it empty.
+        # Projection checkpoints record the last processed global_position.
+        # When we start the next batch with `>= last_position` we re-process the
+        # same event again, burning iterations and slowing catch-up.
+        #
+        # Treat checkpoint as "last processed" and start from next position:
+        # next_pos = last_position + 1, except when last_position is 0
+        # (meaning "nothing processed yet").
+        proj_next_positions: dict[str, int] = {}
+        for projection_name in self._projections:
+            last_pos = checkpoints.get(projection_name, 0)
+            proj_next_positions[projection_name] = last_pos if last_pos == 0 else last_pos + 1
+        min_position = min(proj_next_positions.values()) if proj_next_positions else 0
 
         events: list[StoredEvent] = []
         async for event in self._store.load_all(
             from_global_position=min_position,
-            batch_size=500,
+            batch_size=EVENTS_PER_PROCESS_BATCH,
         ):
             events.append(event)
-            if len(events) >= 500:
+            if len(events) >= EVENTS_PER_PROCESS_BATCH:
                 break
 
         if not events:
@@ -114,8 +128,8 @@ class ProjectionDaemon:
 
         async with self._pool.acquire() as conn:
             for projection_name, projection in self._projections.items():
-                proj_position = checkpoints.get(projection_name, 0)
-                relevant = [e for e in events if e.global_position >= proj_position]
+                proj_next = proj_next_positions.get(projection_name, 0)
+                relevant = [e for e in events if e.global_position >= proj_next]
                 if not relevant:
                     continue
 
@@ -131,7 +145,7 @@ class ProjectionDaemon:
                             event.global_position
                         )
                         self._lag_records[projection_name].last_processed_at = (
-                            datetime.now(tz=timezone.utc)
+                            datetime.now(tz=UTC)
                         )
 
         # Emit CRITICAL logs if SLO is breached repeatedly
@@ -250,7 +264,7 @@ class ProjectionDaemon:
         record = self._lag_records.get(projection_name)
         if record is None:
             return 0
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         delta = now - record.last_processed_at
         return int(delta.total_seconds() * 1000)
 

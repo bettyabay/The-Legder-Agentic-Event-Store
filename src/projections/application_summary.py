@@ -93,30 +93,52 @@ class ApplicationSummaryProjection:
     ) -> None:
         p = event.payload
         app_id = p["application_id"]
-        session_ref = f"agent-{p['agent_id']}-{p['session_id']}"
+        # Some stored CreditAnalysisCompleted payloads (older runs / tests)
+        # may not include agent_id/session_id. The projection must not fail
+        # and stop processing the rest of the stream.
+        agent_id = p.get("agent_id")
+        session_id = p.get("session_id")
 
-        await conn.execute(
-            """
-            UPDATE application_summary SET
-              state = 'ANALYSIS_COMPLETE',
-              risk_tier = $2,
-              agent_sessions_completed = (
-                  SELECT jsonb_agg(DISTINCT elem)
-                  FROM jsonb_array_elements_text(
-                      COALESCE(agent_sessions_completed, '[]'::jsonb) || $3::jsonb
-                  ) elem
-              ),
-              last_event_type = $4,
-              last_event_at = $5,
-              updated_at = NOW()
-            WHERE application_id = $1
-            """,
-            app_id,
-            p.get("risk_tier"),
-            json.dumps([session_ref]),
-            event.event_type,
-            event.recorded_at,
-        )
+        if agent_id and session_id:
+            session_ref = f"agent-{agent_id}-{session_id}"
+            await conn.execute(
+                """
+                UPDATE application_summary SET
+                  state = 'ANALYSIS_COMPLETE',
+                  risk_tier = $2,
+                  agent_sessions_completed = (
+                      SELECT jsonb_agg(DISTINCT elem)
+                      FROM jsonb_array_elements_text(
+                          COALESCE(agent_sessions_completed, '[]'::jsonb) || $3::jsonb
+                      ) elem
+                  ),
+                  last_event_type = $4,
+                  last_event_at = $5,
+                  updated_at = NOW()
+                WHERE application_id = $1
+                """,
+                app_id,
+                p.get("risk_tier"),
+                json.dumps([session_ref]),
+                event.event_type,
+                event.recorded_at,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE application_summary SET
+                  state = 'ANALYSIS_COMPLETE',
+                  risk_tier = $2,
+                  last_event_type = $3,
+                  last_event_at = $4,
+                  updated_at = NOW()
+                WHERE application_id = $1
+                """,
+                app_id,
+                p.get("risk_tier"),
+                event.event_type,
+                event.recorded_at,
+            )
 
     async def _handle_FraudScreeningCompleted(
         self,
@@ -261,14 +283,41 @@ class ApplicationSummaryProjection:
         state: str | None = None,
     ) -> None:
         updates: list[str] = ["last_event_type = $2", "last_event_at = $3", "updated_at = NOW()"]
-        params: list[object] = [event.payload.get("application_id"), event.event_type, event.recorded_at]
+        params: list[object] = [
+            event.payload.get("application_id"),
+            event.event_type,
+            event.recorded_at,
+        ]
         if state:
             updates.append(f"state = ${len(params) + 1}")
             params.append(state)
         sql = f"UPDATE application_summary SET {', '.join(updates)} WHERE application_id = $1"
         await conn.execute(sql, *params)
 
-    _handle_CreditAnalysisRequested = lambda self, e, c: self._handle_generic(e, c, "AWAITING_ANALYSIS")  # noqa: E731
-    _handle_ComplianceCheckRequested = lambda self, e, c: self._handle_generic(e, c, "COMPLIANCE_REVIEW")  # noqa: E731
-    _handle_ComplianceRulePassed = lambda self, e, c: self._handle_generic(e, c)  # noqa: E731
-    _handle_ComplianceRuleFailed = lambda self, e, c: self._handle_generic(e, c)  # noqa: E731
+    async def _handle_CreditAnalysisRequested(
+        self,
+        event: StoredEvent,
+        conn: asyncpg.Connection,  # type: ignore[type-arg]
+    ) -> None:
+        await self._handle_generic(event, conn, "AWAITING_ANALYSIS")
+
+    async def _handle_ComplianceCheckRequested(
+        self,
+        event: StoredEvent,
+        conn: asyncpg.Connection,  # type: ignore[type-arg]
+    ) -> None:
+        await self._handle_generic(event, conn, "COMPLIANCE_REVIEW")
+
+    async def _handle_ComplianceRulePassed(
+        self,
+        event: StoredEvent,
+        conn: asyncpg.Connection,  # type: ignore[type-arg]
+    ) -> None:
+        await self._handle_generic(event, conn)
+
+    async def _handle_ComplianceRuleFailed(
+        self,
+        event: StoredEvent,
+        conn: asyncpg.Connection,  # type: ignore[type-arg]
+    ) -> None:
+        await self._handle_generic(event, conn)
