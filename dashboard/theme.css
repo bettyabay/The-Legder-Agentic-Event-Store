@@ -1,0 +1,128 @@
+/* The Ledger — Streamlit theme inspired by Chakra Purity UI
+   Uses CSS variables and data-theme attribute for light/dark.
+*/
+
+:root {
+  --bg: #0e1117;
+  --surface: #141a23;
+  --surface-2: #1b2330;
+  --text: #e6edf3;
+  --muted: #9aa4b2;
+  --primary: #2dd4bf;        /* teal-400 */
+  --primary-strong: #14b8a6; /* teal-500 */
+  --accent: #60a5fa;         /* blue-400 */
+  --danger: #f87171;
+  --success: #34d399;
+  --card-radius: 14px;
+  --shadow: 0 8px 28px rgba(2, 6, 23, 0.35);
+  --ring: 0 0 0 1px rgba(45, 212, 191, 0.35);
+  --gradient: linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #34d399 100%);
+}
+
+[data-theme='light'] {
+  --bg: #f7fafc;
+  --surface: #ffffff;
+  --surface-2: #f2f6fa;
+  --text: #0f172a;
+  --muted: #64748b;
+  --shadow: 0 8px 28px rgba(2, 6, 23, 0.08);
+  --ring: 0 0 0 1px rgba(20, 184, 166, 0.25);
+}
+
+/* Global */
+.main, .stApp, .stApp > header { background: var(--bg) !important; }
+/* Reserve vertical space for Streamlit top bar so hero is never clipped */
+.block-container { padding-top: 4.2rem; }
+
+/* Small screens need a bit more room because top controls wrap */
+@media (max-width: 900px) {
+  .block-container { padding-top: 5.2rem; }
+}
+
+/* Hero banner */
+.ledger-hero {
+  background: var(--gradient);
+  color: white;
+  border-radius: 18px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
+  margin-top: 6px;
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ledger-hero .brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+.ledger-hero .brand .logo {
+  width: 36px; height: 36px;
+  background: rgba(255,255,255,0.2);
+  border-radius: 10px;
+  display: grid; place-items: center;
+  font-size: 20px;
+}
+.ledger-hero .sub { opacity: 0.9; font-weight: 500; }
+
+/* Cards feel on core Streamlit widgets */
+.stTabs [data-baseweb='tab-list'] { gap: 6px; }
+.stTabs [data-baseweb='tab'] {
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  margin-right: 0;
+  border: none;
+}
+.stTabs [data-baseweb='tab']:hover { filter: brightness(1.05); }
+.stTabs [aria-selected='true'] { outline: var(--ring); }
+
+.stMetric {
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.stDataFrame, .stTable {
+  background: var(--surface);
+  border-radius: var(--card-radius);
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+/* Buttons */
+button[kind='secondary'] { border-radius: 10px; }
+.stButton > button {
+  background: var(--primary-strong);
+  border-radius: 12px;
+  color: white;
+  border: none;
+  box-shadow: var(--shadow);
+}
+.stButton > button:hover { filter: brightness(1.05); }
+
+/* Chips and small badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: rgba(45, 212, 191, 0.12);
+  color: var(--text);
+  border: 1px solid rgba(45, 212, 191, 0.35);
+}
+
+/* Small helpers for colored text */
+.text-muted { color: var(--muted); }
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+.text-accent { color: var(--accent); }
+
